@@ -130,6 +130,18 @@ void gpu_init_text(const std::vector<char>& text)
     g_ctx_initialized = true;
 }
 
+void gpu_set_block_size(int threads)
+{
+    if (threads > 0) {
+        g_ctx.threads = threads;
+    }
+}
+
+int gpu_get_block_size()
+{
+    return g_ctx.threads;
+}
+
 int gpu_count_token_reuse(const std::string& token, double* kernel_ms)
 {
     if (!g_ctx_initialized)
