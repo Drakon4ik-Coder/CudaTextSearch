@@ -136,7 +136,7 @@ int main(int argc, char** argv)
     }
 
     // Example chosen file
-    const char * filepath = "dataset/beowulf.txt";
+    const char * filepath = "dataset/shakespeare.txt";
 
     std::vector<char> file_data = read_file(filepath);
     if (file_data.empty())

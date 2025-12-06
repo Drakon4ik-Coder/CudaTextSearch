@@ -14,7 +14,7 @@ add_executable(cw2
 target_link_libraries(cw2 PRIVATE CUDA::cudart)
 set_target_properties(cw2 PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
-    CUDA_ARCHITECTURES 89 # RTX 4060 Laptop (Ada, SM 8.9). Adjust if building on different GPU.
+    CUDA_ARCHITECTURES 89 # RTX 4060 Laptop (Ada, SM 8.9).
 )
 
 add_custom_command(TARGET cw2 POST_BUILD
