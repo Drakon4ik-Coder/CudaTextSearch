@@ -39,46 +39,107 @@ __global__ void count_kernel(const char* text, int n, const char* token, int tle
         atomicAdd(outCount, sdata[0]);
 }
 
-// Host-side wrapper: copies data to GPU, launches kernel, returns match count.
+namespace {
+inline void checkCuda(cudaError_t err, const char* what)
+{
+    if (err != cudaSuccess) {
+        std::ostringstream oss;
+        oss << what << ": " << cudaGetErrorString(err);
+        throw std::runtime_error(oss.str());
+    }
+}
+}
+
+struct GpuSearchContext {
+    char* d_text = nullptr;
+    int text_len = 0;
+    int* d_count = nullptr;
+    int threads = 256;
+
+    ~GpuSearchContext() { release(); }
+
+    void init(const std::vector<char>& text)
+    {
+        release();
+        text_len = static_cast<int>(text.size());
+        if (text_len == 0) return;
+        checkCuda(cudaMalloc(&d_text, text_len * sizeof(char)), "cudaMalloc d_text");
+        checkCuda(cudaMemcpy(d_text, text.data(), text_len * sizeof(char), cudaMemcpyHostToDevice), "cudaMemcpy d_text");
+        checkCuda(cudaMalloc(&d_count, sizeof(int)), "cudaMalloc d_count");
+    }
+
+    void release()
+    {
+        if (d_text) cudaFree(d_text);
+        if (d_count) cudaFree(d_count);
+        d_text = nullptr;
+        d_count = nullptr;
+        text_len = 0;
+    }
+
+    // Returns count; if kernel_ms is provided, fills it with kernel time in ms.
+    int count_token(const std::string& token, double* kernel_ms = nullptr)
+    {
+        if (!d_text || text_len == 0 || token.empty()) return 0;
+        const int tlen = static_cast<int>(token.size());
+
+        char* d_token = nullptr;
+        checkCuda(cudaMalloc(&d_token, tlen * sizeof(char)), "cudaMalloc d_token");
+        checkCuda(cudaMemcpy(d_token, token.data(), tlen * sizeof(char), cudaMemcpyHostToDevice), "cudaMemcpy d_token");
+        checkCuda(cudaMemset(d_count, 0, sizeof(int)), "cudaMemset d_count");
+
+        const int blocks = (text_len + threads - 1) / threads;
+        const size_t sharedBytes = threads * sizeof(int);
+
+        cudaEvent_t start, stop;
+        if (kernel_ms) {
+            checkCuda(cudaEventCreate(&start), "cudaEventCreate start");
+            checkCuda(cudaEventCreate(&stop), "cudaEventCreate stop");
+            checkCuda(cudaEventRecord(start), "cudaEventRecord start");
+        }
+
+        count_kernel<<<blocks, threads, sharedBytes>>>(d_text, text_len, d_token, tlen, d_count);
+        checkCuda(cudaGetLastError(), "count_kernel launch");
+
+        if (kernel_ms) {
+            checkCuda(cudaEventRecord(stop), "cudaEventRecord stop");
+            checkCuda(cudaEventSynchronize(stop), "cudaEventSynchronize stop");
+            float ms = 0.f;
+            checkCuda(cudaEventElapsedTime(&ms, start, stop), "cudaEventElapsedTime");
+            *kernel_ms = static_cast<double>(ms);
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
+        } else {
+            checkCuda(cudaDeviceSynchronize(), "count_kernel sync");
+        }
+
+        int result = 0;
+        checkCuda(cudaMemcpy(&result, d_count, sizeof(int), cudaMemcpyDeviceToHost), "cudaMemcpy result");
+        cudaFree(d_token);
+        return result;
+    }
+};
+
+// Global context helpers for reuse.
+static GpuSearchContext g_ctx;
+static bool g_ctx_initialized = false;
+
+void gpu_init_text(const std::vector<char>& text)
+{
+    g_ctx.init(text);
+    g_ctx_initialized = true;
+}
+
+int gpu_count_token_reuse(const std::string& token, double* kernel_ms)
+{
+    if (!g_ctx_initialized)
+        throw std::runtime_error("GPU context not initialized. Call gpu_init_text first.");
+    return g_ctx.count_token(token, kernel_ms);
+}
+
+// Simple wrapper to preserve previous API; reinitializes text each call.
 int gpu_count_token(const std::vector<char>& text, const std::string& token)
 {
-    if (token.empty() || text.empty()) return 0;
-
-    auto check = [](cudaError_t err, const char* what) {
-        if (err != cudaSuccess) {
-            std::ostringstream oss;
-            oss << what << ": " << cudaGetErrorString(err);
-            throw std::runtime_error(oss.str());
-        }
-    };
-
-    const int n = static_cast<int>(text.size());
-    const int tlen = static_cast<int>(token.size());
-
-    char* d_text = nullptr;
-    char* d_token = nullptr;
-    int* d_count = nullptr;
-
-    check(cudaMalloc(&d_text, n * sizeof(char)), "cudaMalloc d_text");
-    check(cudaMalloc(&d_token, tlen * sizeof(char)), "cudaMalloc d_token");
-    check(cudaMalloc(&d_count, sizeof(int)), "cudaMalloc d_count");
-
-    check(cudaMemcpy(d_text, text.data(), n * sizeof(char), cudaMemcpyHostToDevice), "cudaMemcpy text");
-    check(cudaMemcpy(d_token, token.data(), tlen * sizeof(char), cudaMemcpyHostToDevice), "cudaMemcpy token");
-    check(cudaMemset(d_count, 0, sizeof(int)), "cudaMemset d_count");
-
-    const int threads = 256;
-    const int blocks = (n + threads - 1) / threads;
-    const size_t sharedBytes = threads * sizeof(int);
-    count_kernel<<<blocks, threads, sharedBytes>>>(d_text, n, d_token, tlen, d_count);
-    check(cudaGetLastError(), "count_kernel launch");
-    check(cudaDeviceSynchronize(), "count_kernel sync");
-
-    int result = 0;
-    check(cudaMemcpy(&result, d_count, sizeof(int), cudaMemcpyDeviceToHost), "cudaMemcpy result");
-
-    cudaFree(d_text);
-    cudaFree(d_token);
-    cudaFree(d_count);
-    return result;
+    gpu_init_text(text);
+    return gpu_count_token_reuse(token, nullptr);
 }

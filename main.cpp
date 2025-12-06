@@ -6,8 +6,11 @@
 #include <cstring>
 #include <string>
 #include <cctype>
+#include <chrono>
 
 int gpu_count_token(const std::vector<char>& text, const std::string& token);
+void gpu_init_text(const std::vector<char>& text);
+int gpu_count_token_reuse(const std::string& token, double* kernel_ms = nullptr);
 
 std::vector<char> read_file(const char* filename)
 {
@@ -84,13 +87,34 @@ int main()
 
     // Example word list
     const char * words[] = {"sword", "fire", "death", "love", "hate", "the", "man", "woman"};
+
+    // Initialize GPU context once with the text to avoid per-word copies.
+    gpu_init_text(file_data);
+    // Warm up CUDA context and JIT; discard this timing.
+    gpu_count_token_reuse("warmup", nullptr);
+
     for(const char * word : words)
     {
+        auto cpu_start = std::chrono::high_resolution_clock::now();
         int cpu_occurrences = calc_token_occurrences(file_data, word);
-        int gpu_occurrences = gpu_count_token(file_data, std::string(word));
+        auto cpu_end = std::chrono::high_resolution_clock::now();
+        double cpu_ms = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
+
+        int gpu_occurrences = -1;
+        double gpu_ms_host = -1.0;
+        double gpu_ms_kernel = -1.0;
+        try {
+            auto gpu_start = std::chrono::high_resolution_clock::now();
+            gpu_occurrences = gpu_count_token_reuse(std::string(word), &gpu_ms_kernel);
+            auto gpu_end = std::chrono::high_resolution_clock::now();
+            gpu_ms_host = std::chrono::duration<double, std::milli>(gpu_end - gpu_start).count();
+        } catch (const std::exception& ex) {
+            std::cerr << "GPU count failed for word '" << word << "': " << ex.what() << std::endl;
+        }
+
         std::cout << "Word: " << word
-                  << " | CPU: " << cpu_occurrences
-                  << " | GPU: " << gpu_occurrences
+                  << " | CPU: " << cpu_occurrences << " (" << cpu_ms << " ms)"
+                  << " | GPU: " << gpu_occurrences << " (host: " << gpu_ms_host << " ms, kernel: " << gpu_ms_kernel << " ms)"
                   << " | Diff: " << (cpu_occurrences - gpu_occurrences)
                   << std::endl;
     }
