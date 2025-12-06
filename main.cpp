@@ -4,6 +4,10 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <string>
+#include <cctype>
+
+int gpu_count_token(const std::vector<char>& text, const std::string& token);
 
 std::vector<char> read_file(const char* filename)
 {
@@ -82,8 +86,13 @@ int main()
     const char * words[] = {"sword", "fire", "death", "love", "hate", "the", "man", "woman"};
     for(const char * word : words)
     {
-        int occurrences = calc_token_occurrences(file_data, word);
-        std::cout << "Found "<< occurrences << " occurrences of word: " << word << std::endl;
+        int cpu_occurrences = calc_token_occurrences(file_data, word);
+        int gpu_occurrences = gpu_count_token(file_data, std::string(word));
+        std::cout << "Word: " << word
+                  << " | CPU: " << cpu_occurrences
+                  << " | GPU: " << gpu_occurrences
+                  << " | Diff: " << (cpu_occurrences - gpu_occurrences)
+                  << std::endl;
     }
 
     return 0;
