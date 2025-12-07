@@ -6,6 +6,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(CUDAToolkit REQUIRED)
 
+# Allow overriding the CUDA architectures
+if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "CUDA architectures to build for")
+endif()
+
+if (MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+
 add_executable(cw2
     main.cpp
     gpu_search.cu
@@ -14,7 +23,6 @@ add_executable(cw2
 target_link_libraries(cw2 PRIVATE CUDA::cudart)
 set_target_properties(cw2 PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
-    CUDA_ARCHITECTURES 89 # RTX 4060 Laptop (Ada, SM 8.9).
 )
 
 add_custom_command(TARGET cw2 POST_BUILD

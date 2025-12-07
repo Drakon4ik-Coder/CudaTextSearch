@@ -35,7 +35,7 @@ __global__ void count_kernel(const char* text, int n, const char* token, int tle
             sdata[threadIdx.x] += sdata[threadIdx.x + offset];
         __syncthreads();
     }
-    if (threadIdx.x == 0)
+    if (threadIdx.x == 0 && sdata[0] > 0)
         atomicAdd(outCount, sdata[0]);
 }
 
